@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.tif
+*.tiff
+*.img
+*.hdf
+*.zip
+*.rar
+*.7z
+*.qgz
+*.aux.xml
+.env
