@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Erosion Prediction Map</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <style>
+    body { margin: 0; font-family: Arial; }
+
+    #header {
+      background: #1f2937;
+      color: white;
+      padding: 15px 20px;
+    }
+
+    #header h1 { margin: 0; font-size: 22px; }
+    #header p { margin: 3px 0 0; font-size: 13px; opacity: 0.8; }
+
+    .controls { padding: 10px; }
+
+    #map { height: 80vh; }
+
+    #legend {
+      position: absolute;
+      bottom: 30px;
+      left: 20px;
+      background: white;
+      padding: 12px;
+      border-radius: 8px;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+      font-size: 13px;
+      line-height: 18px;
+      z-index: 1000;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+
+    .legend-color {
+      width: 16px;
+      height: 16px;
+      margin-right: 8px;
+      border: 1px solid #ccc;
+    }
+
+    #sidebar {
+      position: fixed;
+      top: 0;
+      right: -420px;
+      width: 400px;
+      height: 100%;
+      background: white;
+      box-shadow: -4px 0 15px rgba(0,0,0,0.25);
+      padding: 25px;
+      overflow-y: auto;
+      transition: right 0.35s cubic-bezier(.25,.8,.25,1);
+      z-index: 2000;
+    }
+
+    #sidebar.open { right: 0; }
+
+  </style>
+</head>
+
+<body>
+
+<div id="header">
+  <h1>Soil Erosion Prediction & Risk Assessment System</h1>
+  <p>Machine Learning + RUSLE Based Geospatial Decision Support</p>
+</div>
+
+<div class="controls">
+  <label>Select Region: </label>
+  <select id="regionSelect">
+    <option value="chennai">Chennai (Urban)</option>
+    <option value="thanjavur">Thanjavur (Rural)</option>
+  </select>
+</div>
+
+<div id="map"></div>
+<div id="legend"></div>
+
+<div id="sidebar">
+  <h2>Point Details</h2>
+  <div id="infoContent">
+    <p>Click a point to see details.</p>
+  </div>
+</div>
+
+<script>
+
+var map = L.map('map').setView([13.0, 80.2], 9);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+var geoLayer;
+
+// ================= COLOR FUNCTIONS =================
+
+function getColorChennai(value) {
+  return value <= 3   ? 'white' :
+         value <= 6   ? '#006400' :
+         value <= 9   ? '#32CD32' :
+         value <= 13  ? 'yellow' :
+         'red';
+}
+
+function getColorThanjavur(value) {
+  return value <= 20   ? '#004d00' :
+         value <= 50   ? '#00cc00' :
+         value <= 100  ? 'yellow' :
+         value <= 150  ? 'orange' :
+         value <= 250  ? 'red' :
+         '#8B0000';
+}
+
+// ================= LEGEND =================
+
+function updateLegend(regionType) {
+
+  let legendHTML = "<b>Soil Loss (t/ha/yr)</b><br><br>";
+
+  if (regionType === "urban") {
+    legendHTML += `
+      <div class="legend-item"><div class="legend-color" style="background:white"></div>0 - 3 (Very Low)</div>
+      <div class="legend-item"><div class="legend-color" style="background:#006400"></div>3 - 6 (Low)</div>
+      <div class="legend-item"><div class="legend-color" style="background:#32CD32"></div>6 - 9 (Moderate)</div>
+      <div class="legend-item"><div class="legend-color" style="background:yellow"></div>9 - 13 (High)</div>
+      <div class="legend-item"><div class="legend-color" style="background:red"></div>13+ (Very High)</div>
+    `;
+  } else {
+    legendHTML += `
+      <div class="legend-item"><div class="legend-color" style="background:#004d00"></div>0 - 20</div>
+      <div class="legend-item"><div class="legend-color" style="background:#00cc00"></div>20 - 50</div>
+      <div class="legend-item"><div class="legend-color" style="background:yellow"></div>50 - 100</div>
+      <div class="legend-item"><div class="legend-color" style="background:orange"></div>100 - 150</div>
+      <div class="legend-item"><div class="legend-color" style="background:red"></div>150 - 250</div>
+      <div class="legend-item"><div class="legend-color" style="background:#8B0000"></div>250+</div>
+    `;
+  }
+
+  document.getElementById("legend").innerHTML = legendHTML;
+}
+
+// ================= LOAD DATA =================
+
+function loadGeoJSON(file, regionType) {
+
+  if (geoLayer) map.removeLayer(geoLayer);
+
+  fetch(file)
+    .then(response => response.json())
+    .then(data => {
+
+      geoLayer = L.geoJSON(data, {
+
+        pointToLayer: function(feature, latlng) {
+
+          let soilLoss, color;
+
+          if (regionType === "urban") {
+            soilLoss = feature.properties.soil_loss_ml;
+            color = getColorChennai(soilLoss);
+          } else {
+            soilLoss = feature.properties.soil_loss_clean;
+            color = getColorThanjavur(soilLoss);
+          }
+
+          return L.circleMarker(latlng, {
+            radius: 5,
+            fillColor: color,
+            color: "#000",
+            weight: 0.5,
+            fillOpacity: 0.85
+          });
+        },
+
+        onEachFeature: function(feature, layer) {
+
+          layer.on("mouseover", function() {
+            layer.setStyle({ radius: 7, weight: 1.5 });
+          });
+
+          layer.on("mouseout", function() {
+            layer.setStyle({ radius: 5, weight: 0.5 });
+          });
+
+          layer.on("click", function() {
+
+            let soilLoss, riskLabel, prevention, color;
+            let content = "";
+
+            if (regionType === "urban") {
+
+              soilLoss = feature.properties.soil_loss_ml;
+              riskLabel = feature.properties.erosion_risk;
+              prevention = feature.properties.prevention_action;
+              color = getColorChennai(soilLoss);
+
+              content += "<b>Latitude:</b> " + feature.geometry.coordinates[1].toFixed(6) + "<br>";
+              content += "<b>Longitude:</b> " + feature.geometry.coordinates[0].toFixed(6) + "<hr>";
+
+              content += "<b>DEM:</b> " + feature.properties.dem_chennai_clip_aligned + "<br>";
+              content += "<b>Slope:</b> " + feature.properties.slope_chennai_clip_aligned + "<br>";
+              content += "<b>K Factor:</b> " + feature.properties.k_factor_aligned + "<br>";
+              content += "<b>NDVI:</b> " + feature.properties.ndvi_chennai_clip_aligned + "<br>";
+              content += "<b>LULC:</b> " + feature.properties.lulc_chennai_clip_aligned + "<hr>";
+
+            } else {
+
+              soilLoss = feature.properties.soil_loss_clean;
+              riskLabel = feature.properties.risk_class;
+              prevention = feature.properties.prevention_action;
+              color = getColorThanjavur(soilLoss);
+
+              content += "<b>Latitude:</b> " + feature.geometry.coordinates[1].toFixed(6) + "<br>";
+              content += "<b>Longitude:</b> " + feature.geometry.coordinates[0].toFixed(6) + "<hr>";
+
+              content += "<b>DEM:</b> " + feature.properties.thanjavur_dem_250 + "<br>";
+              content += "<b>Slope:</b> " + feature.properties.slope_250m + "<br>";
+              content += "<b>K Factor:</b> " + feature.properties.thanjavur_kfactor_250m + "<br>";
+              content += "<b>NDVI:</b> " + feature.properties.thanjavur_ndvi_250m + "<br>";
+              content += "<b>Soil Moisture:</b> " + feature.properties.soil_moisture_250m + "<br>";
+              content += "<b>Clay:</b> " + feature.properties.clay_thanjavur_250m + "<br>";
+              content += "<b>Sand:</b> " + feature.properties.sand_thanjavur_250m + "<hr>";
+            }
+
+            content += "<div style='padding:12px; margin-top:10px; background:" + color + ";'>";
+            content += "<b>Predicted Soil Loss:</b> " + soilLoss.toFixed(2) + "<br><br>";
+            content += "<b>Erosion Risk Class:</b> " + riskLabel + "<br><br>";
+            content += "<b>Recommended Action:</b><br>" + prevention;
+            content += "</div>";
+
+            document.getElementById("infoContent").innerHTML = content;
+            document.getElementById("sidebar").classList.add("open");
+          });
+        }
+
+      }).addTo(map);
+
+      updateLegend(regionType);
+    });
+}
+
+// ================= REGION SWITCH =================
+
+document.getElementById("regionSelect").addEventListener("change", function() {
+
+  if (this.value === "chennai") {
+    map.setView([13.0, 80.2], 9);
+    loadGeoJSON("chennai_geojson.geojson", "urban");
+  } else {
+    map.setView([10.8, 79.1], 9);
+    loadGeoJSON("thanjavur_geojson.geojson", "rural");
+  }
+});
+
+// Load Chennai by default
+loadGeoJSON("chennai_geojson.geojson", "urban");
+
+// Close sidebar when clicking empty map
+map.on("click", function(e) {
+  if (!e.originalEvent.target.closest('.leaflet-interactive')) {
+    document.getElementById("sidebar").classList.remove("open");
+  }
+});
+
+</script>
+
+</body>
+</html>
