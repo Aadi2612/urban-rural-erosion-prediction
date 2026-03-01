@@ -62,3 +62,7 @@ GeoJSON integration
 **Project Pipeline
 **
 Data Collection → Data Cleaning → ML Training → Prediction Export → GIS Visualization → Web Deployment
+
+## Large Dataset Notice
+Raw raster datasets are not included due to size limitations.
+They can be provided upon request.
